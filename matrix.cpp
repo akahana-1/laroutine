@@ -1,15 +1,17 @@
-#include <limits>
-#include <vector>
-#include <utility>
-#include <iostream>
-#include <iomanip>
-#include <algorithm>
-#include <cmath>
-#include <tuple>
+#include "matrix.hpp"
 
-typedef std::vector<std::vector<double>> M;
-
-constexpr double epsilon = std::numeric_limits<double>::epsilon();
+std::vector<double> operator*(Matrix& lvalue, std::vector<double>& rvalue){
+	auto res = std::vector<double>(rvalue.size(), 0);
+	if(rvalue.size() != lvalue.column) std::fill(res.begin(), res.end(), NAN);
+	else{
+		for(int i = 0;i < lvalue.row;++i){
+			for(int j = 0;j < lvalue.column;++j){
+				res[i] += lvalue[i][j] * rvalue[j];
+			}
+		}
+	}
+	return res;
+}
 
 void debug(std::vector<std::vector<double> >& m){
 	for(int i = 0;i < m.size();++i){
@@ -20,58 +22,13 @@ void debug(std::vector<std::vector<double> >& m){
 	}
 }
 
-
-class Matrix {
-
-	public:
-		// Constructor
-		Matrix(int row, int column);
-		Matrix(int row, int column, double init);
-		Matrix(M& m);
-		Matrix(const Matrix& src);
-
-		// operator overload
-		inline std::vector<double>& operator[](std::size_t index){
-			return dat[index];
-		}
-		inline const std::vector<double>& operator[](std::size_t index) const{
-			return dat[index];
-		}
-		Matrix operator*(Matrix& rvalue);
-
-		double determine();
-		std::vector<double> solve(std::vector<double>& rvalue);
-		Matrix inverse();
-
-		static Matrix eye(int size){
-			auto m = Matrix(size, size);
-			for(int i = 0;i < size;++i){
-				m[i][i] = 1.;
-			}
-			return m;
-		}
-
-		int row, column;
-
-	private:
-		M dat;
-
-		int pivotsearch(M& mat, int col);
-		std::tuple<Matrix, Matrix> gauss(), lu_decomp();
-
-		template <typename T>
-		static inline bool iszero(T a){
-			return std::fpclassify(a) == FP_ZERO;
-		}
-};
-
 Matrix::Matrix(int row, int column) : Matrix(row, column, 0.0) {
 }
 
 Matrix::Matrix(int row, int column, double init) {
 	this->row = row;
 	this->column = column;
-	dat = M(row, std::vector<double>(column, init));
+	this->dat = M(row, std::vector<double>(column, init));
 }
 
 Matrix::Matrix(const Matrix& src) : Matrix(src.row, src.column) {
@@ -94,7 +51,7 @@ Matrix::Matrix(M& m){
 }
 
 
-Matrix Matrix::operator*(Matrix& rvalue){
+Matrix Matrix::operator*(Matrix const& rvalue){
 	if(rvalue.row != this->row || rvalue.column != this->column) 
 		return Matrix(this->row, this->column, NAN);
 
@@ -104,35 +61,95 @@ Matrix Matrix::operator*(Matrix& rvalue){
 			for(int k = 0;k < this->row;++k){
 				res[i][j] += this->dat[i][k] * rvalue[k][j];
 			}
-			if(Matrix::iszero(res[i][j])) res[i][j] = 0;
+			if(fabs(res[i][j] - 0) < tol) res[i][j] = 0;
 		}
 	}
 	return res;
 }
 
-double Matrix::determine(){
-	double dat = epsilon;
-	if(this->row != this->column) return epsilon;
-	dat = 0.;
-	return dat;
+bool Matrix::operator==(Matrix const& rvalue){
+	bool res = true;
+	if(this->row != rvalue.row || this->column != rvalue.column) return false;
+	for(int i = 0;i < this->row;++i){
+		for(int j = 0;j < this->column;++j){
+			res = res && this->dat[i][j] == rvalue[i][j];
+		}
+	}
+	return res;
+}
+
+ld Matrix::determinant(){
+	ld det = NAN;
+	bool f = false;
+	if(this->row != this->column) return det;
+	Matrix lu = *this, p = Matrix::eye(this->row);
+	this->decomposition(lu, p);
+	det = 1;
+	for(int i = 0;i < this->row;++i) det *= lu[i][i];
+	for(int i = 0;i < this->row;++i) {
+		f = true; det *= p[i][i] == 1 ? 1 : -1;
+	}
+
+	return f ? -1 * det : det;
 }
 
 std::vector<double> Matrix::solve(std::vector<double>& rvalue){
-//	if(this->row != rvalue.size())
+	if(this->row != rvalue.size())
 		return std::vector<double>(rvalue.size(), NAN);
-//	return this->gauss(rvalue);
+	Matrix lu = *this, p = Matrix::eye(this->row);
+	this->decomposition(lu, p);
+	auto res = this->helpersolve(lu, rvalue);
+	res = p * res;
+
+	return res;
 }
 
 Matrix Matrix::inverse(){
-	this->gauss();
-//	debug(this->lu);
-//	debug(this->p);
-	return Matrix(this->row, this->column, 0);
+	Matrix inv(this->row, this->column);
+	std::vector<double> b;
+
+	Matrix lu = *this, p = Matrix::eye(this->row);
+	this->decomposition(lu, p);
+
+	for(int j = 0;j < this->column;++j){
+		b = std::vector<double>(this->row, 0.);
+		for(int i = 0;i < this->row;++i){
+			if(p[i][j]) b[i] = 1;
+		}
+		auto ans = this->helpersolve(lu, b);
+		for(int i = 0;i < this->row;++i){
+			inv[i][j] = ans[i];
+		}
+	}
+
+	auto e = (*this) * inv;
+
+	return inv;
 }
 
-std::tuple<Matrix, Matrix> Matrix::gauss(){
+Matrix Matrix::tril(){
+	auto m = Matrix(this->row, this->column);
+	for(int i = 0;i < this->row;++i){
+		for(int j = 0;j <= i;++j){
+			m[i][j] = (*this)[i][j];
+		}
+	}
+	return m;
+}
+
+Matrix Matrix::triu(){
+	auto m = Matrix(this->row, this->column);
+	for(int i = 0;i < this->row;++i){
+		for(int j = i;j < this->column;++j){
+			m[i][j] = (*this)[i][j];
+		}
+	}
+	return m;
+}
+
+Matrix Matrix::gauss(){
 	int index;
-	//this->A = this->dat;
+
 	auto A = *this;
 	auto P = Matrix::eye(this->row);
 
@@ -149,12 +166,11 @@ std::tuple<Matrix, Matrix> Matrix::gauss(){
 			std::swap(A.dat[index], A.dat[i]);
 			std::swap(indices[index], indices[i]);
 			std::swap(p.dat[index], p.dat[i]);
-	//		std::cout << i << " " << index << std::endl;
 		}
 		double pivot = A[i][i];
 
 		for(int j = i + 1;j < this->row;++j){
-			if(!Matrix::iszero(A[j][i])){
+			if(fabs(A[j][i] - 0) > tol){
 				double m = pivot / A[j][i];
 				for(int k = i;k < column;++k){
 					A[j][k] *= m;
@@ -165,59 +181,138 @@ std::tuple<Matrix, Matrix> Matrix::gauss(){
 			}
 		}
 
-//		debug(P.dat);
-//		debug(p.dat);
-
 		auto t = i == 0 ? P * p : p * P;
 
 		P = Matrix(t);
 	}
 
-	debug(A.dat);
+//	debug(A.dat);
+////
+//	debug(P.dat);
 //
-	debug(P.dat);
+//	auto A_ = P * (*this);
+//
+//	debug(A_.dat);
 
-	auto A_ = P * (*this);
-
-	debug(A_.dat);
-
-	return std::forward_as_tuple(A, P);
+	return A;
 
 }
 
-// LU Decomposition
-std::tuple<Matrix, Matrix> Matrix::lu_decomp(){
+void Matrix::decomposition(Matrix& lu, Matrix& p){
 	int index;
-	double pivot;
-
-	auto LU = *this;
-	auto P = Matrix::eye(this->row);
+	double pivot, div;
 
 	for(int i = 0;i < this->row;++i){
-		index = Matrix::pivotsearch(LU.dat, i);
+		index = Matrix::pivotsearch(lu.dat, i);
 
 		if(index != i){
-			std::swap(LU.dat[index], LU.dat[i]);
-			std::swap(P.dat[index], P.dat[i]);
+			std::swap(lu.dat[index], lu.dat[i]);
+			std::swap(p.dat[index], p.dat[i]);
 		}
 
 		for(int j = 0;j < i;++j){
+			div = 1. / lu.dat[j][j];
 			for(int k = 0;k < j;++k){
-				LU[i][j] -= LU[i][k] * LU[k][j];
+				lu.dat[i][j] -= lu.dat[i][k] * lu.dat[k][j];
 			}
-			LU[i][j] /= LU[j][j];
+			lu.dat[i][j] *= div;
 		}
 
 		for(int j = i;j < this->column;++j){
 			for(int k = 0;k < i;++k){
-				LU[i][j] -= LU[i][k] * LU[k][j];
+				lu.dat[i][j] -= lu.dat[i][k] * lu.dat[k][j];
 			}
 		}
-
 	}
 
-	return std::forward_as_tuple(LU, P);
+	/*
+ 	for(int j = 0;j < this->column - 1;++j){
+ 		index = Matrix::pivotsearch(lu.dat, j);
+ 
+ 		if(index != j){
+ 			std::swap(lu.dat[index], lu.dat[j]);
+ 			std::swap(p.dat[index], p.dat[j]);
+ 		}
+ 
+ 		double a = 1. / lu[j][j];
+ 		for(int i = j + 1;i < this->row;++i){
+ 			lu[i][j] *= a;
+ 			for(int k = j + 1; k < this->column; ++k){
+ 				lu[i][k] -= lu[i][j] * lu[j][k];
+ 			}
+ 		}
+ 	}
+	*/
 }
+
+std::vector<double> Matrix::helpersolve(Matrix const& lu, std::vector<double> const& b){
+	auto ans = b;
+
+	for(int i = 1;i < ans.size();++i){
+		for(int j = 0;j < i;++j){
+			ans[i] -= lu[i][j] * ans[j];
+		}
+	}
+
+	for(int i = lu.row - 1;0 <= i;--i){
+		for(int j = i + 1;j < lu.row;++j){
+			ans[i] -= lu[i][j] * ans[j];
+		}
+		ans[i] /= lu[i][i];
+	}
+
+	return ans;
+}
+
+// LU Decomposition
+// std::pair<M, M> Matrix::lu_decomp(){
+// 	int index;
+// 	double pivot, a;
+// 	M lu, p;
+// 	lu = this->dat; 
+// 	p = M(this->row, std::vector<double>(this->column, 0));
+// 	for(int i = 0;i < this->row;++i) p[i][i] = 1.;
+// 
+// //	auto LU = new Matrix(*this);
+// //	auto P = Matrix::eye(this->row);
+// 
+// 	/*
+// 	for(int j = 0;j < this->column - 1;++j){
+// 		index = Matrix::pivotsearch(LU.dat, j);
+// 
+// 		if(index != j){
+// 			std::swap(LU.dat[index], LU.dat[j]);
+// 			std::swap(P.dat[index], P.dat[j]);
+// 		}
+// 
+// 		double a = 1. / LU[j][j];
+// 		for(int i = j + 1;i < this->row;++i){
+// 			LU[i][j] *= a;
+// 			for(int k = j + 1; k < this->column; ++k){
+// 				LU[i][k] -= LU[i][j] * LU[j][k];
+// 			}
+// 		}
+// 
+// 	}
+// 	*/
+// 
+// 	//debug
+// 	/*
+// 	auto L = LU.tril(), U = LU.triu();
+// 
+// 	for(int i = 0;i < L.row;++i) L[i][i] = 1;
+// 
+// 	auto A_ = (P * (L * U));
+// 
+// 	debug(L.dat);
+// 	
+// 	debug(U.dat);
+// 
+// 	debug(A_.dat);
+// 	*/
+// 
+// 	return std::make_pair(lu, p);
+// }
 
 int Matrix::pivotsearch(M& mat, int col){
 	int index = col;
@@ -230,38 +325,4 @@ int Matrix::pivotsearch(M& mat, int col){
 		}
 	}
 	return index;
-}
-
-std::vector<double>* operator*(const Matrix& lvalue, const std::vector<double>& rvalue){
-	auto res = new std::vector<double>(rvalue.size(), 0);
-	if(rvalue.size() != lvalue.column) std::fill(res->begin(), res->end(), NAN);
-	else{
-		for(int i = 0;i < lvalue.row;++i){
-			for(int j = 0;j < lvalue.column;++j){
-				(*res)[i] += lvalue[i][j] * rvalue[j];
-			}
-		}
-	}
-	return std::move(res);
-}
-
-int main(){
-	using namespace std;
-	const int N = 3;
-	auto d = vector<vector<double> >{{1, 1, 1}, {3, 2, 2}, {2, -1, 3}};
-	auto m = Matrix(d);
-	m.inverse();
-//	auto r = vector<double>{6, 0.02, 10};
-//	for(auto &i : r){
-//		cout << i << endl;
-//	}
-//	auto ans = m.solve(r);
-//	auto check = m * ans;
-//	for(auto &e : ans){
-//		cout << fixed << setprecision(5) << e << endl;
-//	}
-//	for(auto &e : check){
-//		cout << fixed << setprecision(5) << e << endl;
-//	}
-	return 0;
 }
