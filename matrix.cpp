@@ -1,18 +1,5 @@
 #include "matrix.hpp"
 
-std::vector<double> operator*(Matrix& lvalue, std::vector<double>& rvalue){
-	auto res = std::vector<double>(rvalue.size(), 0);
-	if(rvalue.size() != lvalue.column) std::fill(res.begin(), res.end(), NAN);
-	else{
-		for(int i = 0;i < lvalue.row;++i){
-			for(int j = 0;j < lvalue.column;++j){
-				res[i] += lvalue[i][j] * rvalue[j];
-			}
-		}
-	}
-	return res;
-}
-
 void debug(std::vector<std::vector<double> >& m){
 	for(int i = 0;i < m.size();++i){
 		for(int j = 0;j < m[i].size();++j){
@@ -20,6 +7,13 @@ void debug(std::vector<std::vector<double> >& m){
 		}
 		std::cout << std::endl;
 	}
+}
+
+bool iszero(double a){
+	return fabs(a - 0) < tol;
+}
+
+Matrix::Matrix() : Matrix(0, 0){
 }
 
 Matrix::Matrix(int row, int column) : Matrix(row, column, 0.0) {
@@ -61,7 +55,7 @@ Matrix Matrix::operator*(Matrix const& rvalue){
 			for(int k = 0;k < this->row;++k){
 				res[i][j] += this->dat[i][k] * rvalue[k][j];
 			}
-			if(fabs(res[i][j] - 0) < tol) res[i][j] = 0;
+			if(iszero(res[i][j])) res[i][j] = 0;
 		}
 	}
 	return res;
@@ -72,7 +66,7 @@ bool Matrix::operator==(Matrix const& rvalue){
 	if(this->row != rvalue.row || this->column != rvalue.column) return false;
 	for(int i = 0;i < this->row;++i){
 		for(int j = 0;j < this->column;++j){
-			res = res && this->dat[i][j] == rvalue[i][j];
+			res = res && iszero(this->dat[i][j] - rvalue[i][j]);
 		}
 	}
 	return res;
@@ -83,7 +77,7 @@ ld Matrix::determinant(){
 	bool f = false;
 	if(this->row != this->column) return det;
 	Matrix lu = *this, p = Matrix::eye(this->row);
-	this->decomposition(lu, p);
+	this->lu_decomp(lu, p);
 	det = 1;
 	for(int i = 0;i < this->row;++i) det *= lu[i][i];
 	for(int i = 0;i < this->row;++i) {
@@ -96,10 +90,19 @@ ld Matrix::determinant(){
 std::vector<double> Matrix::solve(std::vector<double>& rvalue){
 	if(this->row != rvalue.size())
 		return std::vector<double>(rvalue.size(), NAN);
-	Matrix lu = *this, p = Matrix::eye(this->row);
-	this->decomposition(lu, p);
-	auto res = this->helpersolve(lu, rvalue);
-	res = p * res;
+	Matrix lu, p;
+	this->lu_decomp(lu, p);
+	Matrix pinv = p.inverse();
+
+	auto L = lu.tril(), U = lu.triu();
+	for(int i = 0;i < this->row;++i) L[i][i] = 1.;
+	debug(L.dat);
+	debug(U.dat);
+	debug(p.dat);
+	auto b = pinv * rvalue;
+
+	auto res = this->helpersolve(lu, b);
+//	res = pinv * res;
 
 	return res;
 }
@@ -108,8 +111,9 @@ Matrix Matrix::inverse(){
 	Matrix inv(this->row, this->column);
 	std::vector<double> b;
 
-	Matrix lu = *this, p = Matrix::eye(this->row);
-	this->decomposition(lu, p);
+	Matrix lu, p;
+	this->lu_decomp(lu, p);
+
 
 	for(int j = 0;j < this->column;++j){
 		b = std::vector<double>(this->row, 0.);
@@ -121,8 +125,6 @@ Matrix Matrix::inverse(){
 			inv[i][j] = ans[i];
 		}
 	}
-
-	auto e = (*this) * inv;
 
 	return inv;
 }
@@ -170,7 +172,7 @@ Matrix Matrix::gauss(){
 		double pivot = A[i][i];
 
 		for(int j = i + 1;j < this->row;++j){
-			if(fabs(A[j][i] - 0) > tol){
+			if(!iszero(A[j][i])){
 				double m = pivot / A[j][i];
 				for(int k = i;k < column;++k){
 					A[j][k] *= m;
@@ -186,21 +188,40 @@ Matrix Matrix::gauss(){
 		P = Matrix(t);
 	}
 
-//	debug(A.dat);
-////
-//	debug(P.dat);
-//
-//	auto A_ = P * (*this);
-//
-//	debug(A_.dat);
-
 	return A;
 
 }
 
-void Matrix::decomposition(Matrix& lu, Matrix& p){
+void Matrix::lu_decomp(Matrix& lu, Matrix& p){
 	int index;
 	double pivot, div;
+
+	lu = *this;
+	p = Matrix::eye(this->row);
+
+	/*
+	for(int j = 0;j < this->column;++j){
+		index = Matrix::pivotsearch(lu.dat, j);
+
+		if(index != j){
+			std::swap(lu.dat[index], lu.dat[j]);
+			std::swap(p.dat[index], p.dat[j]);
+		}
+
+		// 軸選択をしても改善されない時
+		if(iszero(lu[j][j])) {
+			lu = Matrix(this->row, this->column, NAN);
+			break;
+		}
+
+		for(int i = j + 1;i < this->row;++i){
+			lu[i][j] /= lu[j][j];
+			for(int k = j + 1;k < this->column;++k){
+				lu[i][k] -= lu[i][j] * lu[j][k];
+			}
+		}
+	}
+	*/
 
 	for(int i = 0;i < this->row;++i){
 		index = Matrix::pivotsearch(lu.dat, i);
@@ -208,6 +229,12 @@ void Matrix::decomposition(Matrix& lu, Matrix& p){
 		if(index != i){
 			std::swap(lu.dat[index], lu.dat[i]);
 			std::swap(p.dat[index], p.dat[i]);
+		}
+
+		// 軸選択をしても改善されない時
+		if(iszero(lu[i][i])) {
+			lu = Matrix(this->row, this->column, NAN);
+			break;
 		}
 
 		for(int j = 0;j < i;++j){
@@ -225,24 +252,6 @@ void Matrix::decomposition(Matrix& lu, Matrix& p){
 		}
 	}
 
-	/*
- 	for(int j = 0;j < this->column - 1;++j){
- 		index = Matrix::pivotsearch(lu.dat, j);
- 
- 		if(index != j){
- 			std::swap(lu.dat[index], lu.dat[j]);
- 			std::swap(p.dat[index], p.dat[j]);
- 		}
- 
- 		double a = 1. / lu[j][j];
- 		for(int i = j + 1;i < this->row;++i){
- 			lu[i][j] *= a;
- 			for(int k = j + 1; k < this->column; ++k){
- 				lu[i][k] -= lu[i][j] * lu[j][k];
- 			}
- 		}
- 	}
-	*/
 }
 
 std::vector<double> Matrix::helpersolve(Matrix const& lu, std::vector<double> const& b){
@@ -252,67 +261,19 @@ std::vector<double> Matrix::helpersolve(Matrix const& lu, std::vector<double> co
 		for(int j = 0;j < i;++j){
 			ans[i] -= lu[i][j] * ans[j];
 		}
+		ans[i] = iszero(ans[i]) ? 0. : ans[i];
 	}
 
 	for(int i = lu.row - 1;0 <= i;--i){
-		for(int j = i + 1;j < lu.row;++j){
+		for(int j = i + 1;j < lu.column;++j){
 			ans[i] -= lu[i][j] * ans[j];
 		}
 		ans[i] /= lu[i][i];
+		ans[i] = iszero(ans[i]) ? 0. : ans[i];
 	}
 
 	return ans;
 }
-
-// LU Decomposition
-// std::pair<M, M> Matrix::lu_decomp(){
-// 	int index;
-// 	double pivot, a;
-// 	M lu, p;
-// 	lu = this->dat; 
-// 	p = M(this->row, std::vector<double>(this->column, 0));
-// 	for(int i = 0;i < this->row;++i) p[i][i] = 1.;
-// 
-// //	auto LU = new Matrix(*this);
-// //	auto P = Matrix::eye(this->row);
-// 
-// 	/*
-// 	for(int j = 0;j < this->column - 1;++j){
-// 		index = Matrix::pivotsearch(LU.dat, j);
-// 
-// 		if(index != j){
-// 			std::swap(LU.dat[index], LU.dat[j]);
-// 			std::swap(P.dat[index], P.dat[j]);
-// 		}
-// 
-// 		double a = 1. / LU[j][j];
-// 		for(int i = j + 1;i < this->row;++i){
-// 			LU[i][j] *= a;
-// 			for(int k = j + 1; k < this->column; ++k){
-// 				LU[i][k] -= LU[i][j] * LU[j][k];
-// 			}
-// 		}
-// 
-// 	}
-// 	*/
-// 
-// 	//debug
-// 	/*
-// 	auto L = LU.tril(), U = LU.triu();
-// 
-// 	for(int i = 0;i < L.row;++i) L[i][i] = 1;
-// 
-// 	auto A_ = (P * (L * U));
-// 
-// 	debug(L.dat);
-// 	
-// 	debug(U.dat);
-// 
-// 	debug(A_.dat);
-// 	*/
-// 
-// 	return std::make_pair(lu, p);
-// }
 
 int Matrix::pivotsearch(M& mat, int col){
 	int index = col;
@@ -325,4 +286,17 @@ int Matrix::pivotsearch(M& mat, int col){
 		}
 	}
 	return index;
+}
+
+std::vector<double> operator*(Matrix& lvalue, std::vector<double>& rvalue){
+	auto res = std::vector<double>(rvalue.size(), 0);
+	if(rvalue.size() != lvalue.column) std::fill(res.begin(), res.end(), NAN);
+	else{
+		for(int i = 0;i < lvalue.row;++i){
+			for(int j = 0;j < lvalue.column;++j){
+				res[i] += lvalue[i][j] * rvalue[j];
+			}
+		}
+	}
+	return res;
 }

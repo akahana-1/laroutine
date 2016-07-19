@@ -20,6 +20,7 @@ class Matrix {
 
 	public:
 		// Constructor
+		Matrix();
 		Matrix(int row, int column);
 		Matrix(int row, int column, double init);
 		Matrix(M& m);
@@ -55,8 +56,10 @@ class Matrix {
 
 		int pivotsearch(M& mat, int col);
 		Matrix gauss();
-		void decomposition(Matrix& lu, Matrix& p);
+		void lu_decomp(Matrix& lu, Matrix& p);
 		std::vector<double> helpersolve(Matrix const& lu, std::vector<double> const& b);
 };
+
+std::vector<double> operator*(Matrix& lvalue, std::vector<double>& rvalue);
 
 #endif
