@@ -4,7 +4,6 @@
 #include <limits>
 #include <vector>
 #include <utility>
-#include <iostream>
 #include <iomanip>
 #include <algorithm>
 #include <cmath>
@@ -34,13 +33,16 @@ class Matrix {
 			return dat[index];
 		}
 		Matrix operator*(Matrix const& rvalue);
+		Matrix operator+(Matrix const& rvalue);
+		Matrix operator-(Matrix const& rvalue);
 		bool operator==(Matrix const& rvalue);
 
 		int row, column;
 
 		ld determinant();
 		std::vector<double> solve(std::vector<double>& rvalue);
-		Matrix inverse(), triu(), tril(), diag();
+		Matrix inverse(), triu(), tril(), diag(), eig(), transpose();
+		void transform();
 
 		static Matrix eye(int size){
 			auto m = Matrix(size, size);
@@ -56,10 +58,14 @@ class Matrix {
 
 		int pivotsearch(M& mat, int col);
 		Matrix gauss();
-		void lu_decomp(Matrix& lu, Matrix& p);
+		int lu_decomp(Matrix& lu, Matrix& p);
+		void qr_decomp(Matrix& q, Matrix& r);
+		Matrix householder();
+		std::vector<double> inverseiterate(double sigma, std::vector<double> vec = std::vector<double>(0));
 		std::vector<double> helpersolve(Matrix const& lu, std::vector<double> const& b);
 };
 
 std::vector<double> operator*(Matrix& lvalue, std::vector<double>& rvalue);
+Matrix operator*(double const& k, Matrix const& A);
 
 #endif
